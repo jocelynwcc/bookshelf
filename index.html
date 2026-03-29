@@ -296,11 +296,10 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 
 <div class="toast" id="toast"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="firebase-config.js"></script>
 <script>
 // ── Firebase 設定 ───────────────────────────────────────────────
-const FB_PROJECT = FIREBASE_CONFIG.projectId;
-const FB_API_KEY = FIREBASE_CONFIG.apiKey;
+const FB_PROJECT = 'my-bookshelf-a66cb';
+const FB_API_KEY = 'AIzaSyCbLjYingxT3-7oWDC_vVJOx33zdwmGBgU';
 const FB_BASE    = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents/bookshelf/main`;
 
 let currentIdToken = null;
@@ -344,7 +343,7 @@ function initFirebaseAuth() {
   if (!fbAuthApp) {
     fbAuthApp = firebase.initializeApp({
       apiKey: FB_API_KEY,
-      authDomain: FIREBASE_CONFIG.authDomain,
+      authDomain: 'my-bookshelf-a66cb.firebaseapp.com',
       projectId: FB_PROJECT
     }, 'auth-app');
   }
@@ -1034,7 +1033,7 @@ Promise.all([
   if (!fbAuthApp) {
     fbAuthApp = firebase.initializeApp({
       apiKey: FB_API_KEY,
-      authDomain: FIREBASE_CONFIG.authDomain,
+      authDomain: 'my-bookshelf-a66cb.firebaseapp.com',
       projectId: FB_PROJECT
     }, 'auth-app');
   }
