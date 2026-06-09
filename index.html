@@ -720,13 +720,16 @@ function renderList() {
       <div class="book-inner" onclick="toggleBook(${b.id})">
         <div class="book-cover">${b.cover ? `<img src="${b.cover}" alt="封面" onerror="this.style.display='none'">` : `<span class="cover-ph">📖</span>`}</div>
         <div class="book-body">
-          <div class="row1" style="position:relative;padding-right:52px">
+          <div class="row1" style="position:relative;padding-right:96px">
             <span class="book-title">${b.title}</span>
             <span class="badge ${SC[b.status]}">${SL[b.status]}</span>
             ${b.noteStatus==='noted' ? `<span class="badge b-noted">已筆記</span>` : b.noteStatus==='noting' ? `<span class="badge b-noting">筆記中</span>` : b.noteStatus==='pending' ? `<span class="badge b-pending-note">待筆記</span>` : ''}
             ${stars ? `<span class="stars">${stars}</span>` : ''}
             ${dateStr ? `<span class="badge b-date">讀完 ${dateStr}</span>` : ''}
-            <button onclick="event.stopPropagation();editBook(${b.id})" style="position:absolute;right:0;top:0;font-size:11px;padding:2px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#888;white-space:nowrap">編輯</button>
+            <div style="position:absolute;right:0;top:0;display:flex;gap:4px">
+              <button onclick="event.stopPropagation();editBook(${b.id})" style="font-size:11px;padding:2px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#888;white-space:nowrap">編輯</button>
+              <button onclick="event.stopPropagation();deleteBook(${b.id})" style="font-size:11px;padding:2px 8px;border:1px solid #fcc;border-radius:6px;background:#fff;cursor:pointer;color:#A32D2D;white-space:nowrap">刪除</button>
+            </div>
           </div>
           <div class="row2">
             <span class="book-sub">${b.author||''}</span>
@@ -876,6 +879,14 @@ function openModal(b=null) {
   document.getElementById('modalOverlay').classList.add('open');
 }
 function editBook(id) { openModal(books.find(b => b.id===id)); }
+function deleteBook(id) {
+  const b = books.find(b => b.id===id);
+  if (!b) return;
+  if (!confirm(`確定要刪除「${b.title}」？`)) return;
+  books = books.filter(b => b.id!==id);
+  scheduleSave(); render();
+  showToast('已刪除');
+}
 function closeModal() { document.getElementById('modalOverlay').classList.remove('open'); editingId=null; }
 
 // ── ISBN 自動查詢（依序嘗試多個資料庫）────────────────────────
