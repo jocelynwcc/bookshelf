@@ -28,11 +28,13 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 .stat-label{font-size:11px;color:#888;margin-top:2px}
 .filter-section{display:flex;flex-direction:column;gap:6px;margin-bottom:1rem}
 .filter-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filter-row-split{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.filter-half{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .filter-label{font-size:11px;color:#aaa;min-width:28px;flex-shrink:0}
 .filter-btn{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#666}
-.filter-btn.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.filter-btn.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
 .rating-btn{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#BA7517}
-.rating-btn.active{background:#BA7517;color:#fff;border-color:#BA7517}
+.rating-btn.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
 .tag-filter{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#666}
 .tag-filter.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
 .booklist{display:flex;flex-direction:column;gap:8px}
@@ -161,10 +163,10 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
     </div>
     <div class="stats" id="statsRow"></div>
     <div class="filter-section">
-      <div class="filter-row" id="filterRow"></div>
+      <div class="filter-row-split" id="filterRow"></div>
       <div class="filter-row" id="ratingFilterRow"></div>
       <div class="filter-row" id="locFilterRow"></div>
-      <div class="filter-row" id="tagFilterRow"></div>
+      <div class="filter-row" id="tagFilterRow" style="align-items:flex-start"></div>
     </div>
     <div id="pagination"></div>
     <div class="booklist" id="booklist"><div class="loading">連線 Firebase 中…</div></div>
@@ -676,13 +678,16 @@ function renderFilters() {
   const tags = allTags();
   const locs = allLocOptions();
 
-  // 第1行：狀態 ＋ 中間開始的筆記
+  // 第1行：狀態（左半）＋ 筆記（右半，從畫面中間開始）
   document.getElementById('filterRow').innerHTML =
+    `<div class="filter-half">` +
     `<span class="filter-label">狀態</span>` +
     statusOpts.map(([v,l]) => `<button class="filter-btn${activeFilter===v?' active':''}" onclick="setFilter('${v}')">${l}</button>`).join('') +
-    `<span style="display:inline-block;width:1px;height:16px;background:#e0e0e0;margin:0 6px;align-self:center;flex-shrink:0"></span>` +
+    `</div>` +
+    `<div class="filter-half">` +
     `<span class="filter-label">筆記</span>` +
-    noteOpts.map(([v,l]) => `<button class="filter-btn${activeNoteFilter===v?' active':''}" onclick="setNoteFilter('${v}')">${l}</button>`).join('');
+    noteOpts.map(([v,l]) => `<button class="filter-btn${activeNoteFilter===v?' active':''}" onclick="setNoteFilter('${v}')">${l}</button>`).join('') +
+    `</div>`;
 
   // 第2行：評分
   document.getElementById('ratingFilterRow').innerHTML =
@@ -703,11 +708,13 @@ function renderFilters() {
     locRow.innerHTML = '';
   }
 
-  // 第4行：分類
+  // 第4行：分類（換行但不超過 label）
   document.getElementById('tagFilterRow').innerHTML =
-    `<span class="filter-label">分類</span>` +
+    `<span class="filter-label" style="padding-top:4px;flex-shrink:0;align-self:flex-start">分類</span>` +
+    `<div style="display:flex;flex-wrap:wrap;gap:6px">` +
     `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
-    tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${t}')">${t}</button>`).join('');
+    tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${t}')">${t}</button>`).join('') +
+    `</div>`;
 }
 
 function goPage(p) { currentPage = p; renderList(); window.scrollTo({top:0,behavior:'smooth'}); }
