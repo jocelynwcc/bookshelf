@@ -156,7 +156,7 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 
   <div id="tabShelf">
     <div class="topbar">
-      <input type="text" placeholder="搜尋書名、作者、ISBN..." id="searchInput" oninput="render()">
+      <input type="text" placeholder="搜尋書名、作者、ISBN..." id="searchInput" oninput="currentPage=0;render()">
       <button onclick="openModal()">+ 新增書籍</button>
     </div>
     <div class="stats" id="statsRow"></div>
@@ -166,8 +166,8 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
       <div class="filter-row" id="locFilterRow"></div>
       <div class="filter-row" id="tagFilterRow"></div>
     </div>
+    <div id="pagination"></div>
     <div class="booklist" id="booklist"><div class="loading">連線 Firebase 中…</div></div>
-    <button class="add-btn" onclick="openModal()">+ 新增一本書</button>
   </div>
 
   <div id="tabDash" style="display:none">
@@ -457,6 +457,8 @@ let goals = {}; goals[THIS_YEAR] = 50;
 let nextId = 1;
 let activeFilter = 'all', activeRating = 0, activeTag = '', activeNoteFilter = '', activeLocFilter = '';
 let editingId = null, currentTags = [], currentLocs = [];
+const PAGE_SIZE = 100;
+let currentPage = 0;
 let activeGoalYear = THIS_YEAR, activePieStatus = 'all', activeBarYear = THIS_YEAR;
 let pieChartInst = null, barChartInst = null;
 let saveTimer = null, isSaving = false;
@@ -708,10 +710,28 @@ function renderFilters() {
     tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${t}')">${t}</button>`).join('');
 }
 
+function goPage(p) { currentPage = p; renderList(); window.scrollTo({top:0,behavior:'smooth'}); }
+
 function renderList() {
   const list = filtered();
-  if (!list.length) { document.getElementById('booklist').innerHTML = '<div class="empty">沒有找到符合的書</div>'; return; }
-  document.getElementById('booklist').innerHTML = list.map(b => {
+  const paginationEl = document.getElementById('pagination');
+  if (!list.length) {
+    document.getElementById('booklist').innerHTML = '<div class="empty">沒有找到符合的書</div>';
+    paginationEl.innerHTML = '';
+    return;
+  }
+  const totalPages = Math.ceil(list.length / PAGE_SIZE);
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  const pageItems = list.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const btnStyle = 'font-size:12px;padding:4px 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;color:#444';
+  const btnDisabled = 'font-size:12px;padding:4px 14px;border:1px solid #eee;border-radius:8px;background:#f5f5f3;cursor:default;color:#bbb';
+  paginationEl.innerHTML = totalPages > 1 ? `
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 0 12px;font-size:13px;color:#888">
+      <button onclick="goPage(${currentPage-1})" ${currentPage===0?'disabled':''} style="${currentPage===0?btnDisabled:btnStyle}">← 上一頁</button>
+      <span>第 ${currentPage+1} 頁 / 共 ${totalPages} 頁（${list.length} 本）</span>
+      <button onclick="goPage(${currentPage+1})" ${currentPage===totalPages-1?'disabled':''} style="${currentPage===totalPages-1?btnDisabled:btnStyle}">下一頁 →</button>
+    </div>` : '';
+  document.getElementById('booklist').innerHTML = pageItems.map(b => {
     const stars = b.rating ? '★'.repeat(b.rating) + '☆'.repeat(5-b.rating) : '';
     const dateStr = b.status==='done' && b.finishedDate ? formatDate(b.finishedDate) : '';
     const locs = b.locations || [];
@@ -720,16 +740,13 @@ function renderList() {
       <div class="book-inner" onclick="toggleBook(${b.id})">
         <div class="book-cover">${b.cover ? `<img src="${b.cover}" alt="封面" onerror="this.style.display='none'">` : `<span class="cover-ph">📖</span>`}</div>
         <div class="book-body">
-          <div class="row1" style="position:relative;padding-right:96px">
+          <div class="row1" style="position:relative;padding-right:52px">
             <span class="book-title">${b.title}</span>
             <span class="badge ${SC[b.status]}">${SL[b.status]}</span>
             ${b.noteStatus==='noted' ? `<span class="badge b-noted">已筆記</span>` : b.noteStatus==='noting' ? `<span class="badge b-noting">筆記中</span>` : b.noteStatus==='pending' ? `<span class="badge b-pending-note">待筆記</span>` : ''}
             ${stars ? `<span class="stars">${stars}</span>` : ''}
             ${dateStr ? `<span class="badge b-date">讀完 ${dateStr}</span>` : ''}
-            <div style="position:absolute;right:0;top:0;display:flex;gap:4px">
-              <button onclick="event.stopPropagation();editBook(${b.id})" style="font-size:11px;padding:2px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#888;white-space:nowrap">編輯</button>
-              <button onclick="event.stopPropagation();deleteBook(${b.id})" style="font-size:11px;padding:2px 8px;border:1px solid #fcc;border-radius:6px;background:#fff;cursor:pointer;color:#A32D2D;white-space:nowrap">刪除</button>
-            </div>
+            <button onclick="event.stopPropagation();editBook(${b.id})" style="position:absolute;right:0;top:0;font-size:11px;padding:2px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#888;white-space:nowrap">編輯</button>
           </div>
           <div class="row2">
             <span class="book-sub">${b.author||''}</span>
@@ -746,17 +763,20 @@ function renderList() {
         ${b.isbn ? `<div class="detail-grid"><span class="lbl">ISBN</span><span class="val">${b.isbn}</span></div>` : ''}
         ${b.note ? `<div class="book-note">${b.note}</div>` : `<div class="book-note" style="color:#ccc">尚無短評</div>`}
         ${b.evernote ? `<a href="${b.evernote}" style="font-size:12px;color:#00A82D;text-decoration:none;display:inline-flex;align-items:center;gap:4px" target="_blank">📒 開啟 Evernote 筆記</a>` : ''}
+        <div class="expand-actions">
+          <button onclick="event.stopPropagation();deleteBook(${b.id})" style="font-size:12px;padding:3px 10px;border:1px solid #fcc;border-radius:8px;background:#fff;cursor:pointer;color:#A32D2D">刪除此書</button>
+        </div>
       </div>` : ''}
     </div>`;
-  }).join('');
+  }).join('') + pagination;
 }
 
 function toggleBook(id) { books = books.map(b => b.id===id ? {...b, open:!b.open} : b); renderList(); }
-function setFilter(f) { activeFilter=f; render(); }
-function setRating(r) { activeRating=r; render(); }
-function setTagFilter(t) { activeTag=t; render(); }
-function setNoteFilter(n) { activeNoteFilter=n; render(); }
-function setLocFilter(l) { activeLocFilter=l; render(); }
+function setFilter(f) { activeFilter=f; currentPage=0; render(); }
+function setRating(r) { activeRating=r; currentPage=0; render(); }
+function setTagFilter(t) { activeTag=t; currentPage=0; render(); }
+function setNoteFilter(n) { activeNoteFilter=n; currentPage=0; render(); }
+function setLocFilter(l) { activeLocFilter=l; currentPage=0; render(); }
 
 // ── 儀表板 ──────────────────────────────────────────────────────
 function renderDashboard() {
