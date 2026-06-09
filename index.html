@@ -341,7 +341,11 @@ function showLoginError(msg) {
 }
 
 let fbAuthApp = null;
-function initFirebaseAuth() {
+let authListenerSet = false;
+let sessionStarted = false;
+
+// 初始化 Auth App，並註冊狀態監聽（監聽器只註冊一次，避免重複觸發 onSignedIn）
+function ensureAuthApp() {
   if (!fbAuthApp) {
     fbAuthApp = firebase.initializeApp({
       apiKey: FB_API_KEY,
@@ -350,20 +354,25 @@ function initFirebaseAuth() {
     }, 'auth-app');
   }
   const auth = firebase.auth(fbAuthApp);
+  if (!authListenerSet) {
+    authListenerSet = true;
+    // 自動恢復登入狀態（重新整理頁面後不需再次登入）
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        user.getIdToken().then(token => {
+          currentIdToken = token;
+          onSignedIn(user.displayName || user.email, token, auth);
+        });
+      } else {
+        document.getElementById('loginError').style.display = 'none';
+      }
+    });
+  }
+  return auth;
+}
 
-  // 自動恢復登入狀態（重新整理頁面後不需再次登入）
-  auth.onAuthStateChanged(user => {
-    if (user) {
-      user.getIdToken().then(token => {
-        currentIdToken = token;
-        onSignedIn(user.displayName || user.email, token, auth);
-      });
-    } else {
-      // 未登入，顯示登入畫面（已在啟動時處理）
-      document.getElementById('loginError').style.display = 'none';
-    }
-  });
-
+function initFirebaseAuth() {
+  const auth = ensureAuthApp();
   // 若尚未登入，執行 Google Popup 登入
   if (!auth.currentUser) {
     const provider = new firebase.auth.GoogleAuthProvider();
@@ -378,7 +387,10 @@ function onSignedIn(name, token, auth) {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('signOutBtn').style.display = 'inline-block';
   document.getElementById('signOutBtn').title = name;
+  if (sessionStarted) return;  // 避免重複載入與重複計時器
+  sessionStarted = true;
   // 每 50 分鐘刷新 token（有效期 1 小時）
+  clearInterval(tokenRefreshTimer);
   tokenRefreshTimer = setInterval(() => {
     const user = auth.currentUser;
     if (user) user.getIdToken(true).then(t => { currentIdToken = t; });
@@ -391,6 +403,8 @@ function signOut() {
     firebase.auth(fbAuthApp).signOut().then(() => {
       currentIdToken = null;
       clearInterval(tokenRefreshTimer);
+      clearInterval(pollTimer); pollTimer = null;
+      sessionStarted = false;
       document.getElementById('signOutBtn').style.display = 'none';
       document.getElementById('loginScreen').style.display = 'block';
       document.getElementById('tabShelf').style.display = 'none';
@@ -463,7 +477,7 @@ const PAGE_SIZE = 50;
 let currentPage = 0;
 let activeGoalYear = THIS_YEAR, activePieStatus = 'all', activeBarYear = THIS_YEAR;
 let pieChartInst = null, barChartInst = null;
-let saveTimer = null, isSaving = false;
+let saveTimer = null, isSaving = false, pollTimer = null;
 
 // ── Firebase 同步 ───────────────────────────────────────────────
 function setSyncStatus(state, msg) {
@@ -492,7 +506,7 @@ async function saveToFirebase() {
 
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveToFirebase, 2000);
+  saveTimer = setTimeout(() => { saveTimer = null; saveToFirebase(); }, 2000);
 }
 
 async function loadFromFirebase() {
@@ -515,21 +529,30 @@ async function loadFromFirebase() {
     document.getElementById('booklist').innerHTML = '<div class="empty">連線失敗，請確認網路後重新整理</div>';
   }
   render();
-  // 每 30 秒自動重新整理（讓其他裝置的修改能同步進來）
-  setInterval(async () => {
-    try {
-      const data = await fbGet();
-      if (!data) return;
-      books = (data.books || []).map(b => ({...b, open: false}));
-      if (data.goals && typeof data.goals === 'object') goals = data.goals;
-      if (data.nextId) nextId = data.nextId;
-      setSyncStatus('ok', '已同步');
-      render();
-    } catch(e) { /* 靜默失敗，不打擾使用者 */ }
-  }, 30000);
+  // 每 30 秒自動重新整理（讓其他裝置的修改能同步進來）；僅啟動一次
+  if (!pollTimer) {
+    pollTimer = setInterval(async () => {
+      // 若有尚未完成的本機存檔，跳過此次同步，避免覆蓋未存檔的編輯
+      if (saveTimer || isSaving || pendingSave) return;
+      try {
+        const data = await fbGet();
+        if (!data) return;
+        const openIds = new Set(books.filter(b => b.open).map(b => b.id));
+        books = (data.books || []).map(b => ({...b, open: openIds.has(b.id)}));
+        if (data.goals && typeof data.goals === 'object') goals = data.goals;
+        if (data.nextId) nextId = data.nextId;
+        setSyncStatus('ok', '已同步');
+        render();
+      } catch(e) { /* 靜默失敗，不打擾使用者 */ }
+    }, 30000);
+  }
 }
 
 // ── 工具函式 ────────────────────────────────────────────────────
+// HTML 跳脫（防止書名/標籤等特殊字元破版）
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// 用於 onclick 等屬性內的 JS 字串參數（先做 JS 跳脫再做 HTML 屬性跳脫）
+function escJs(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function allTags() { const s = new Set(); books.forEach(b => (b.tags||[]).forEach(t => s.add(t))); return [...s].sort(); }
 function doneYears() { const s = new Set(); books.forEach(b => { if(b.finishedDate) s.add(parseInt(b.finishedDate.split('-')[0])); }); return [...s].sort((a,b) => b-a); }
 function formatDate(d) { if(!d) return ''; const [y,m,day] = d.split('-'); return `${y}年${parseInt(m)}月${parseInt(day)}日`; }
@@ -556,8 +579,23 @@ document.addEventListener('paste', function(e) {
       const file = item.getAsFile();
       const reader = new FileReader();
       reader.onload = function(ev) {
-        document.getElementById('f-cover').value = ev.target.result;
-        previewCover();
+        // 縮小圖片以節省空間（封面最寬 400px，避免 Firestore 單文件 1MB 上限）
+        const img = new Image();
+        img.onload = function() {
+          const maxW = 400;
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          document.getElementById('f-cover').value = canvas.toDataURL('image/jpeg', 0.8);
+          previewCover();
+        };
+        img.onerror = function() {
+          document.getElementById('f-cover').value = ev.target.result;
+          previewCover();
+        };
+        img.src = ev.target.result;
       };
       reader.readAsDataURL(file);
       break;
@@ -585,7 +623,7 @@ function renderMsSelected(type) {
   const arr = type==='loc' ? currentLocs : currentTags;
   const cls = type==='loc' ? 'chip-loc' : 'chip-tag';
   document.getElementById(`${type}-selected`).innerHTML = arr.map(v =>
-    `<span class="chip ${cls}">${v}<span class="rm" onmousedown="event.preventDefault();msRemove('${type}','${v}')">×</span></span>`
+    `<span class="chip ${cls}">${esc(v)}<span class="rm" onmousedown="event.preventDefault();msRemove('${type}','${escJs(v)}')">×</span></span>`
   ).join('');
 }
 
@@ -597,10 +635,10 @@ function renderMsDropdown(type) {
   const dd = document.getElementById(`${type}-dropdown`);
   const showAdd = q && !opts.some(o => o.toLowerCase()===q);
   dd.innerHTML =
-    filtered.map(o => `<div class="ms-opt${selected.includes(o)?' selected':''}" onmousedown="event.preventDefault();msToggle('${type}','${o}')">
-      <span class="ms-opt-check">${selected.includes(o)?'✓':''}</span>${o}
+    filtered.map(o => `<div class="ms-opt${selected.includes(o)?' selected':''}" onmousedown="event.preventDefault();msToggle('${type}','${escJs(o)}')">
+      <span class="ms-opt-check">${selected.includes(o)?'✓':''}</span>${esc(o)}
     </div>`).join('') +
-    `<div class="ms-add-row" id="${type}-add-row" style="${showAdd?'display:block':'display:none'}" onmousedown="event.preventDefault();msAdd('${type}','${q}')">+ 新增「${q}」</div>`;
+    `<div class="ms-add-row" id="${type}-add-row" style="${showAdd?'display:block':'display:none'}" onmousedown="event.preventDefault();msAdd('${type}','${escJs(q)}')">+ 新增「${esc(q)}」</div>`;
   dd.classList.add('open');
 }
 
@@ -703,7 +741,7 @@ function renderFilters() {
     locRow.innerHTML =
       `<span class="filter-label">位置</span>` +
       `<button class="tag-filter${activeLocFilter===''?' active':''}" onclick="setLocFilter('')">全部</button>` +
-      locs.map(l => `<button class="tag-filter${activeLocFilter===l?' active':''}" onclick="setLocFilter('${l}')">${l}</button>`).join('');
+      locs.map(l => `<button class="tag-filter${activeLocFilter===l?' active':''}" onclick="setLocFilter('${escJs(l)}')">${esc(l)}</button>`).join('');
   } else {
     locRow.innerHTML = '';
   }
@@ -713,7 +751,7 @@ function renderFilters() {
     `<span class="filter-label" style="padding-top:4px;flex-shrink:0;align-self:flex-start">分類</span>` +
     `<div style="display:flex;flex-wrap:wrap;gap:6px">` +
     `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
-    tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${t}')">${t}</button>`).join('') +
+    tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${escJs(t)}')">${esc(t)}</button>`).join('') +
     `</div>`;
 }
 
@@ -745,10 +783,10 @@ function renderList() {
     const tags = b.tags || [];
     return `<div class="book-card">
       <div class="book-inner" onclick="toggleBook(${b.id})">
-        <div class="book-cover">${b.cover ? `<img src="${b.cover}" alt="封面" onerror="this.style.display='none'">` : `<span class="cover-ph">📖</span>`}</div>
+        <div class="book-cover">${b.cover ? `<img src="${esc(b.cover)}" alt="封面" onerror="this.style.display='none'">` : `<span class="cover-ph">📖</span>`}</div>
         <div class="book-body">
           <div class="row1" style="position:relative;padding-right:52px">
-            <span class="book-title">${b.title}</span>
+            <span class="book-title">${esc(b.title)}</span>
             <span class="badge ${SC[b.status]}">${SL[b.status]}</span>
             ${b.noteStatus==='noted' ? `<span class="badge b-noted">已筆記</span>` : b.noteStatus==='noting' ? `<span class="badge b-noting">筆記中</span>` : b.noteStatus==='pending' ? `<span class="badge b-pending-note">待筆記</span>` : ''}
             ${stars ? `<span class="stars">${stars}</span>` : ''}
@@ -756,20 +794,20 @@ function renderList() {
             <button onclick="event.stopPropagation();editBook(${b.id})" style="position:absolute;right:0;top:0;font-size:11px;padding:2px 8px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#888;white-space:nowrap">編輯</button>
           </div>
           <div class="row2">
-            <span class="book-sub">${b.author||''}</span>
-            ${b.year ? `<span class="sep">·</span><span class="book-sub">${b.year}</span>` : ''}
-            ${b.publisher ? `<span class="sep">·</span><span class="book-sub">${b.publisher}</span>` : ''}
+            <span class="book-sub">${esc(b.author||'')}</span>
+            ${b.year ? `<span class="sep">·</span><span class="book-sub">${esc(b.year)}</span>` : ''}
+            ${b.publisher ? `<span class="sep">·</span><span class="book-sub">${esc(b.publisher)}</span>` : ''}
           </div>
           <div class="row3">
-            ${locs.map(l => `<span class="badge b-loc">${l}</span>`).join('')}
-            ${tags.map(t => `<span class="badge b-tag">${t}</span>`).join('')}
+            ${locs.map(l => `<span class="badge b-loc">${esc(l)}</span>`).join('')}
+            ${tags.map(t => `<span class="badge b-tag">${esc(t)}</span>`).join('')}
           </div>
         </div>
       </div>
       ${b.open ? `<div class="expand-area">
-        ${b.isbn ? `<div class="detail-grid"><span class="lbl">ISBN</span><span class="val">${b.isbn}</span></div>` : ''}
-        ${b.note ? `<div class="book-note">${b.note}</div>` : `<div class="book-note" style="color:#ccc">尚無短評</div>`}
-        ${b.evernote ? `<a href="${b.evernote}" style="font-size:12px;color:#00A82D;text-decoration:none;display:inline-flex;align-items:center;gap:4px" target="_blank">📒 開啟 Evernote 筆記</a>` : ''}
+        ${b.isbn ? `<div class="detail-grid"><span class="lbl">ISBN</span><span class="val">${esc(b.isbn)}</span></div>` : ''}
+        ${b.note ? `<div class="book-note">${esc(b.note)}</div>` : `<div class="book-note" style="color:#ccc">尚無短評</div>`}
+        ${b.evernote ? `<a href="${esc(b.evernote)}" style="font-size:12px;color:#00A82D;text-decoration:none;display:inline-flex;align-items:center;gap:4px" target="_blank">📒 開啟 Evernote 筆記</a>` : ''}
         <div class="expand-actions">
           <button onclick="event.stopPropagation();deleteBook(${b.id})" style="font-size:12px;padding:3px 10px;border:1px solid #fcc;border-radius:8px;background:#fff;cursor:pointer;color:#A32D2D">刪除此書</button>
         </div>
@@ -1067,24 +1105,8 @@ Promise.all([
   loadScript('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js'),
   loadScript('https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js')
 ]).then(() => {
-  // SDK 載入完成，初始化並嘗試自動恢復登入
-  if (!fbAuthApp) {
-    fbAuthApp = firebase.initializeApp({
-      apiKey: FB_API_KEY,
-      authDomain: 'my-bookshelf-a66cb.firebaseapp.com',
-      projectId: FB_PROJECT
-    }, 'auth-app');
-  }
-  const auth = firebase.auth(fbAuthApp);
-  auth.onAuthStateChanged(user => {
-    if (user) {
-      user.getIdToken().then(token => {
-        currentIdToken = token;
-        onSignedIn(user.displayName || user.email, token, auth);
-      });
-    }
-    // 未登入維持登入畫面
-  });
+  // SDK 載入完成，初始化並註冊監聽以自動恢復登入（未登入則維持登入畫面）
+  ensureAuthApp();
 }).catch(() => {
   // SDK 載入失敗不影響手動點登入按鈕
 });
