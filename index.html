@@ -33,6 +33,10 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 .filter-label{font-size:12px;color:#444;font-weight:600;min-width:28px;flex-shrink:0}
 .blank-btn{font-size:12px;padding:3px 10px;border:1px dashed #ccc;border-radius:999px;background:#fafafa;cursor:pointer;color:#999}
 .blank-btn.active{background:#F1EFE8;color:#5F5E5A;border-color:#bbb;border-style:solid}
+.cat-tags{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0;overflow:hidden}
+.cat-tags.collapsed{max-height:27px}
+.more-btn{flex-shrink:0;font-size:12px;color:#3C3489;background:none;border:none;cursor:pointer;padding:4px 0 0 2px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.more-btn:hover{text-decoration:underline}
 .filter-btn{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#666}
 .filter-btn.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
 .rating-btn{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#BA7517}
@@ -490,7 +494,7 @@ let books = [];
 let goals = {}; goals[THIS_YEAR] = 50;
 let nextId = 1;
 let activeFilter = 'all', activeRating = 0, activeTag = '', activeNoteFilter = '', activeLocFilter = '';
-let tagOrder = [], tagSorting = false, dragTag = null;
+let tagOrder = [], tagSorting = false, dragTag = null, tagExpanded = false;
 let editingId = null, currentTags = [], currentLocs = [];
 const PAGE_SIZE = 50;
 let currentPage = 0;
@@ -789,11 +793,29 @@ function renderFilters() {
     : `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
       tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${escJs(t)}')">${esc(t)}</button>`).join('') +
       `<button class="blank-btn${activeTag==='__blank__'?' active':''}" onclick="setTagFilter('__blank__')">空白</button>`;
+  const collapsed = !tagSorting && !tagExpanded;
   document.getElementById('tagFilterRow').innerHTML =
     `<span class="filter-label" style="padding-top:4px;flex-shrink:0;align-self:flex-start">分類</span>` +
-    `<div style="display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0">` +
+    `<div class="cat-tags${collapsed?' collapsed':''}" id="catTags">` +
     tagInner +
-    `</div>`;
+    `</div>` +
+    `<button class="more-btn" id="catMoreBtn" onclick="toggleTagExpand()" style="display:none"></button>`;
+  updateTagMoreBtn();
+}
+
+// 分類展開／收合（預設只顯示第一行）
+function toggleTagExpand() { tagExpanded = !tagExpanded; renderFilters(); }
+function updateTagMoreBtn() {
+  const tags = document.getElementById('catTags'), btn = document.getElementById('catMoreBtn');
+  if (!tags || !btn) return;
+  if (tagSorting) { btn.style.display = 'none'; return; }     // 排序模式顯示全部，不需展開鈕
+  const overflowing = tags.scrollHeight > tags.clientHeight + 2;
+  if (tagExpanded || overflowing) {
+    btn.style.display = 'inline-flex';
+    btn.innerHTML = tagExpanded ? '▴ 收合' : '▾ 展開';
+  } else {
+    btn.style.display = 'none';
+  }
 }
 
 // ── 標籤排序 ────────────────────────────────────────────────────
