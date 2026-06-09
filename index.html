@@ -728,7 +728,7 @@ function renderList() {
   paginationEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 0 12px;font-size:13px;color:#888">
       <button onclick="goPage(${currentPage-1})" ${currentPage===0?'disabled':''} style="${currentPage===0?btnDisabled:btnStyle}">← 上一頁</button>
-      <span>第 ${currentPage+1} 頁 / 共 ${totalPages} 頁（${list.length} 本）</span>
+      <span>第 ${currentPage*PAGE_SIZE+1}～${Math.min((currentPage+1)*PAGE_SIZE,list.length)} 本　·　第 ${currentPage+1} / ${totalPages} 頁（共 ${list.length} 本）</span>
       <button onclick="goPage(${currentPage+1})" ${currentPage===totalPages-1?'disabled':''} style="${currentPage===totalPages-1?btnDisabled:btnStyle}">下一頁 →</button>
     </div>`;
   document.getElementById('booklist').innerHTML = pageItems.map(b => {
