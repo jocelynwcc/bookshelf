@@ -139,6 +139,7 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
     <button class="nav-btn" id="navDash" onclick="showTab('dash')">統計儀表板</button>
     <div class="nav-spacer"></div>
     <span class="sync-status sync-ing" id="syncStatus">連線中…</span>
+    <button class="nav-io-btn" onclick="autoFillBooks()" id="autoFillBtn">補齊書目</button>
     <button class="nav-io-btn" onclick="exportData()">匯出</button>
     <label class="nav-io-btn" style="cursor:pointer">匯入<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
     <button class="nav-io-btn" onclick="signOut()" id="signOutBtn" style="display:none">登出</button>
@@ -477,7 +478,7 @@ const PAGE_SIZE = 50;
 let currentPage = 0;
 let activeGoalYear = THIS_YEAR, activePieStatus = 'all', activeBarYear = THIS_YEAR;
 let pieChartInst = null, barChartInst = null;
-let saveTimer = null, isSaving = false, pollTimer = null;
+let saveTimer = null, isSaving = false, pollTimer = null, autoFilling = false;
 
 // ── Firebase 同步 ───────────────────────────────────────────────
 function setSyncStatus(state, msg) {
@@ -532,8 +533,8 @@ async function loadFromFirebase() {
   // 每 30 秒自動重新整理（讓其他裝置的修改能同步進來）；僅啟動一次
   if (!pollTimer) {
     pollTimer = setInterval(async () => {
-      // 若有尚未完成的本機存檔，跳過此次同步，避免覆蓋未存檔的編輯
-      if (saveTimer || isSaving || pendingSave) return;
+      // 若有尚未完成的本機存檔或正在補齊書目，跳過此次同步，避免覆蓋
+      if (saveTimer || isSaving || pendingSave || autoFilling) return;
       try {
         const data = await fbGet();
         if (!data) return;
@@ -1084,6 +1085,96 @@ function importData(event) {
     event.target.value='';
   };
   reader.readAsText(file);
+}
+
+// ── 一鍵補齊書目（出版社／出版年／ISBN）────────────────────────
+// 查詢單一書籍資料，依序嘗試 Google Books → Open Library。回傳 {year, publisher, isbn} 或 null。
+let _googleBooksOK = true;  // 補齊期間 Google Books 配額是否仍可用
+async function lookupBookData(b) {
+  const hasIsbn = !!b.isbn;
+  const cleanIsbn = hasIsbn ? b.isbn.replace(/[-\s]/g,'') : '';
+  // 1) Google Books（配額未滿才嘗試；對繁中書效果最好）
+  if (_googleBooksOK) {
+    try {
+      const url = hasIsbn
+        ? 'https://www.googleapis.com/books/v1/volumes?q=isbn:' + encodeURIComponent(cleanIsbn)
+        : 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent((b.title + ' ' + (b.author||'')).trim()) + '&langRestrict=zh&maxResults=1';
+      const json = await (await fetch(url)).json();
+      if (json.error && json.error.code === 429) {
+        _googleBooksOK = false;  // 配額用盡，後續書籍直接改用 Open Library
+      } else {
+        const info = json.items && json.items[0] ? json.items[0].volumeInfo : null;
+        if (info) {
+          const ids = info.industryIdentifiers || [];
+          const newIsbn = (ids.find(x=>x.type==='ISBN_13') || ids.find(x=>x.type==='ISBN_10') || {}).identifier || '';
+          return { year: info.publishedDate ? info.publishedDate.slice(0,4) : '', publisher: info.publisher || '', isbn: newIsbn };
+        }
+      }
+    } catch(e) { /* Google 失敗，往下用 Open Library */ }
+  }
+  // 2) Open Library 備援
+  try {
+    if (hasIsbn) {
+      const json = await (await fetch('https://openlibrary.org/api/books?bibkeys=ISBN:' + cleanIsbn + '&format=json&jscmd=data')).json();
+      const d = json['ISBN:' + cleanIsbn];
+      if (d) return {
+        year: (d.publish_date || '').match(/\d{4}/) ? (d.publish_date.match(/\d{4}/))[0] : '',
+        publisher: (d.publishers && d.publishers[0]) ? d.publishers[0].name : '', isbn: ''
+      };
+    } else {
+      const json = await (await fetch('https://openlibrary.org/search.json?limit=1&title=' + encodeURIComponent(b.title) + (b.author ? '&author=' + encodeURIComponent(b.author) : ''))).json();
+      const doc = json.docs && json.docs[0];
+      if (doc) return {
+        year: doc.first_publish_year ? String(doc.first_publish_year) : '',
+        publisher: (doc.publisher && doc.publisher[0]) || '', isbn: (doc.isbn && doc.isbn[0]) || ''
+      };
+    }
+  } catch(e) { /* Open Library 也失敗 */ }
+  return null;
+}
+
+async function autoFillBooks() {
+  const targets = books.filter(b => !b.isbn || !b.publisher || !b.year);
+  if (!targets.length) { alert('所有書籍的出版社、出版年、ISBN 都已填寫，無需補齊。'); return; }
+  if (!confirm(`將為 ${targets.length} 本缺少資料的書籍自動查詢補齊（只補空白欄位，不會覆蓋你已填的資料）。\n\n建議先點「匯出」備份。要繼續嗎？`)) return;
+
+  autoFilling = true;
+  _googleBooksOK = true;  // 每次執行重設配額旗標
+  const btn = document.getElementById('autoFillBtn');
+  const orig = btn ? btn.textContent : '';
+  let filled = 0;
+  const review = [];   // 用書名搜尋猜測的書，需人工確認版本
+  const failed = [];   // 查不到的書
+
+  for (let i = 0; i < targets.length; i++) {
+    const b = targets[i];
+    if (btn) btn.textContent = `補齊中 ${i+1}/${targets.length}…`;
+    const viaTitle = !b.isbn;
+    let info = null;
+    try { info = await lookupBookData(b); } catch(e) { info = null; }
+    if (info) {
+      let changed = false;
+      if (!b.year && info.year)           { b.year = info.year; changed = true; }
+      if (!b.publisher && info.publisher) { b.publisher = info.publisher; changed = true; }
+      if (!b.isbn && info.isbn)           { b.isbn = info.isbn; changed = true; }
+      if (changed) { filled++; if (viaTitle) review.push(b.title); }
+      else failed.push(b.title);
+    } else {
+      failed.push(b.title);
+    }
+    await new Promise(r => setTimeout(r, 350));  // 避免觸發查詢頻率限制
+  }
+
+  autoFilling = false;
+  if (btn) btn.textContent = orig;
+  if (filled) scheduleSave();
+  render();
+
+  let msg = `已補齊 ${filled} 本書的資料。`;
+  if (!_googleBooksOK) msg += `\n\n⛔ Google Books 今日查詢額度已用盡，本次部分書籍改用 Open Library 查詢（繁體中文書命中率較低）。建議明天再執行一次，補齊剩餘書籍。`;
+  if (review.length) msg += `\n\n⚠️ 以下 ${review.length} 本是用書名搜尋猜測的，請特別確認版本是否正確：\n` + review.slice(0,40).join('、') + (review.length>40?' …':'');
+  if (failed.length) msg += `\n\n查不到資料（請手動填寫）：\n` + failed.slice(0,40).join('、') + (failed.length>40?' …':'');
+  alert(msg);
 }
 
 document.getElementById('modalOverlay').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
