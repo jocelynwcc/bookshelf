@@ -166,7 +166,7 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
       <div class="filter-row-split" id="filterRow"></div>
       <div class="filter-row" id="ratingFilterRow"></div>
       <div class="filter-row" id="locFilterRow"></div>
-      <div class="filter-row" id="tagFilterRow" style="align-items:flex-start"></div>
+      <div class="filter-row" id="tagFilterRow" style="align-items:flex-start;flex-wrap:nowrap"></div>
     </div>
     <div id="pagination"></div>
     <div class="booklist" id="booklist"><div class="loading">連線 Firebase 中…</div></div>
@@ -749,7 +749,7 @@ function renderFilters() {
   // 第4行：分類（換行但不超過 label）
   document.getElementById('tagFilterRow').innerHTML =
     `<span class="filter-label" style="padding-top:4px;flex-shrink:0;align-self:flex-start">分類</span>` +
-    `<div style="display:flex;flex-wrap:wrap;gap:6px">` +
+    `<div style="display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0">` +
     `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
     tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${escJs(t)}')">${esc(t)}</button>`).join('') +
     `</div>`;
