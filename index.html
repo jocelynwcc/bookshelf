@@ -37,6 +37,13 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 .rating-btn.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
 .tag-filter{font-size:12px;padding:3px 10px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;color:#666}
 .tag-filter.active{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
+.nav-io-btn.active-sort{background:#534AB7;color:#fff;border-color:#534AB7}
+.tag-sorting{cursor:grab;border-style:dashed !important;border-color:#AFA9EC !important;color:#534AB7 !important}
+.tag-filter.dragging{opacity:.4}
+.tag-filter.tag-over{border-color:#534AB7 !important;border-style:solid !important;background:#EEEDFE !important}
+#toTopBtn{position:fixed;right:18px;bottom:24px;width:42px;height:42px;border-radius:50%;border:none;background:rgba(26,26,26,0.4);color:#fff;font-size:20px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;z-index:200;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);transition:background .2s,opacity .2s;box-shadow:0 2px 8px rgba(0,0,0,0.15)}
+#toTopBtn:hover{background:rgba(26,26,26,0.7)}
+#toTopBtn.show{display:flex}
 .booklist{display:flex;flex-direction:column;gap:8px}
 .book-card{background:#fff;border:1px solid #e8e8e5;border-radius:12px;overflow:hidden;transition:border-color 0.15s}
 .book-card:hover{border-color:#ccc}
@@ -141,6 +148,7 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
     <button class="nav-btn" id="navDash" onclick="showTab('dash')">統計儀表板</button>
     <div class="nav-spacer"></div>
     <span class="sync-status sync-ing" id="syncStatus">連線中…</span>
+    <button class="nav-io-btn" onclick="toggleTagSort()" id="tagSortBtn">排序標籤</button>
     <button class="nav-io-btn" onclick="autoFillBooks()" id="autoFillBtn">補齊書目</button>
     <button class="nav-io-btn" onclick="exportData()">匯出</button>
     <label class="nav-io-btn" style="cursor:pointer">匯入<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
@@ -302,6 +310,7 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 </div>
 
 <div class="toast" id="toast"></div>
+<button id="toTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="回到頂端" aria-label="回到頂端">↑</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 // ── Firebase 設定 ───────────────────────────────────────────────
@@ -414,7 +423,7 @@ function signOut() {
       document.getElementById('loginScreen').style.display = 'block';
       document.getElementById('tabShelf').style.display = 'none';
       document.getElementById('tabDash').style.display = 'none';
-      books = []; goals = {}; goals[THIS_YEAR] = 50;
+      books = []; goals = {}; goals[THIS_YEAR] = 50; tagOrder = []; tagSorting = false;
     });
   }
 }
@@ -477,6 +486,7 @@ let books = [];
 let goals = {}; goals[THIS_YEAR] = 50;
 let nextId = 1;
 let activeFilter = 'all', activeRating = 0, activeTag = '', activeNoteFilter = '', activeLocFilter = '';
+let tagOrder = [], tagSorting = false, dragTag = null;
 let editingId = null, currentTags = [], currentLocs = [];
 const PAGE_SIZE = 50;
 let currentPage = 0;
@@ -499,7 +509,7 @@ async function saveToFirebase() {
   setSyncStatus('ing', '儲存中…');
   try {
     const cleanBooks = books.map(({open, ...rest}) => rest);
-    await fbSet({books: cleanBooks, goals, nextId, updatedAt: new Date().toISOString()});
+    await fbSet({books: cleanBooks, goals, nextId, tagOrder, updatedAt: new Date().toISOString()});
     setSyncStatus('ok', '已同步');
   } catch(e) {
     setSyncStatus('err', '同步失敗');
@@ -523,6 +533,7 @@ async function loadFromFirebase() {
       books = (data.books || []).map(b => ({...b, open: false}));
       if (data.goals && typeof data.goals === 'object') goals = data.goals;
       if (data.nextId) nextId = data.nextId;
+      if (Array.isArray(data.tagOrder)) tagOrder = data.tagOrder;
       setSyncStatus('ok', '已同步');
     } else {
       books = [];
@@ -546,6 +557,7 @@ async function loadFromFirebase() {
         books = (data.books || []).map(b => ({...b, open: openIds.has(b.id)}));
         if (data.goals && typeof data.goals === 'object') goals = data.goals;
         if (data.nextId) nextId = data.nextId;
+        if (Array.isArray(data.tagOrder)) tagOrder = data.tagOrder;
         setSyncStatus('ok', '已同步');
         render();
       } catch(e) { /* 靜默失敗，不打擾使用者 */ }
@@ -558,7 +570,12 @@ async function loadFromFirebase() {
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // 用於 onclick 等屬性內的 JS 字串參數（先做 JS 跳脫再做 HTML 屬性跳脫）
 function escJs(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-function allTags() { const s = new Set(); books.forEach(b => (b.tags||[]).forEach(t => s.add(t))); return [...s].sort(); }
+function allTags() {
+  const s = new Set(); books.forEach(b => (b.tags||[]).forEach(t => s.add(t)));
+  const ordered = tagOrder.filter(t => s.has(t));               // 已自訂順序且仍存在
+  const rest = [...s].filter(t => !tagOrder.includes(t)).sort(); // 未列入者，字母排序補在後面
+  return [...ordered, ...rest];
+}
 function doneYears() { const s = new Set(); books.forEach(b => { if(b.finishedDate) s.add(parseInt(b.finishedDate.split('-')[0])); }); return [...s].sort((a,b) => b-a); }
 function formatDate(d) { if(!d) return ''; const [y,m,day] = d.split('-'); return `${y}年${parseInt(m)}月${parseInt(day)}日`; }
 function toggleDateField() {
@@ -751,13 +768,45 @@ function renderFilters() {
     locRow.innerHTML = '';
   }
 
-  // 第4行：分類（換行但不超過 label）
+  // 第4行：分類（換行但不超過 label）；排序模式時改為可拖曳
+  const tagInner = tagSorting
+    ? tags.map(t => `<button class="tag-filter tag-sorting" draggable="true"
+        ondragstart="tagDragStart(event,'${escJs(t)}')"
+        ondragover="event.preventDefault();this.classList.add('tag-over')"
+        ondragleave="this.classList.remove('tag-over')"
+        ondrop="tagDrop(event,'${escJs(t)}')"
+        ondragend="tagDragEnd(event)">${esc(t)}</button>`).join('')
+    : `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
+      tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${escJs(t)}')">${esc(t)}</button>`).join('');
   document.getElementById('tagFilterRow').innerHTML =
     `<span class="filter-label" style="padding-top:4px;flex-shrink:0;align-self:flex-start">分類</span>` +
     `<div style="display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0">` +
-    `<button class="tag-filter${activeTag===''?' active':''}" onclick="setTagFilter('')">全部</button>` +
-    tags.map(t => `<button class="tag-filter${activeTag===t?' active':''}" onclick="setTagFilter('${escJs(t)}')">${esc(t)}</button>`).join('') +
+    tagInner +
     `</div>`;
+}
+
+// ── 標籤排序 ────────────────────────────────────────────────────
+function toggleTagSort() {
+  if (!tagSorting && !allTags().length) { alert('目前沒有分類標籤可排序。'); return; }
+  tagSorting = !tagSorting;
+  const btn = document.getElementById('tagSortBtn');
+  if (btn) { btn.textContent = tagSorting ? '完成' : '排序標籤'; btn.classList.toggle('active-sort', tagSorting); }
+  if (!tagSorting) scheduleSave();   // 離開排序模式時確保已存
+  renderFilters();
+}
+function tagDragStart(e, t) { dragTag = t; e.dataTransfer.effectAllowed = 'move'; e.target.classList.add('dragging'); }
+function tagDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.tag-over').forEach(x => x.classList.remove('tag-over')); }
+function tagDrop(e, target) {
+  e.preventDefault();
+  document.querySelectorAll('.tag-over').forEach(x => x.classList.remove('tag-over'));
+  if (dragTag === null || dragTag === target) return;
+  const order = allTags();   // 以目前完整顯示順序為基準
+  const from = order.indexOf(dragTag), to = order.indexOf(target);
+  if (from < 0 || to < 0) return;
+  order.splice(to, 0, order.splice(from, 1)[0]);
+  tagOrder = order;
+  scheduleSave();
+  renderFilters();
 }
 
 function goPage(p) { currentPage = p; renderList(); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -1062,7 +1111,7 @@ function showToast(msg) {
 }
 
 function exportData() {
-  const payload = {books, goals, nextId, exportedAt: new Date().toISOString()};
+  const payload = {books, goals, nextId, tagOrder, exportedAt: new Date().toISOString()};
   const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1082,6 +1131,7 @@ function importData(event) {
       books = data.books.map(b => ({...b, open:false}));
       if (data.goals && typeof data.goals==='object') goals = data.goals;
       if (data.nextId) nextId = data.nextId;
+      if (Array.isArray(data.tagOrder)) tagOrder = data.tagOrder;
       activeFilter='all'; activeRating=0; activeTag=''; activeNoteFilter=''; activeLocFilter='';
       await saveToFirebase(); render();
       showToast(`成功匯入 ${books.length} 本書`);
@@ -1182,6 +1232,12 @@ async function autoFillBooks() {
 }
 
 document.getElementById('modalOverlay').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
+
+// 回到頂端按鈕：捲動超過 300px 才顯示
+window.addEventListener('scroll', function() {
+  const btn = document.getElementById('toTopBtn');
+  if (btn) btn.classList.toggle('show', window.scrollY > 300);
+});
 
 // ── 啟動：顯示登入畫面，並預載 Auth SDK 以自動恢復登入 ──────────
 document.getElementById('loginScreen').style.display = 'block';
