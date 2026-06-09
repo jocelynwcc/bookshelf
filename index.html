@@ -50,6 +50,12 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
 #toTopBtn{position:fixed;right:18px;bottom:24px;width:42px;height:42px;border-radius:50%;border:none;background:rgba(26,26,26,0.4);color:#fff;font-size:20px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;z-index:200;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);transition:background .2s,opacity .2s;box-shadow:0 2px 8px rgba(0,0,0,0.15)}
 #toTopBtn:hover{background:rgba(26,26,26,0.7)}
 #toTopBtn.show{display:flex}
+.listbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:4px}
+.sortbar{display:flex;align-items:center;gap:6px}
+.sort-lbl{font-size:12px;color:#444;font-weight:600}
+.sortbar select{font-size:13px;padding:4px 8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#1a1a1a;cursor:pointer}
+.dir-btn{font-size:14px;line-height:1;padding:5px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;color:#444}
+.dir-btn:hover{background:#f0f0ee}
 .booklist{display:flex;flex-direction:column;gap:8px}
 .book-card{background:#fff;border:1px solid #e8e8e5;border-radius:12px;overflow:hidden;transition:border-color 0.15s}
 .book-card:hover{border-color:#ccc}
@@ -187,7 +193,21 @@ body{font-family:system-ui,sans-serif;background:#f9f9f7;color:#1a1a1a;min-heigh
       <div class="filter-row" id="locFilterRow"></div>
       <div class="filter-row" id="tagFilterRow" style="align-items:flex-start;flex-wrap:nowrap"></div>
     </div>
-    <div id="pagination"></div>
+    <div class="listbar">
+      <div class="sortbar">
+        <span class="sort-lbl">排序</span>
+        <select id="sortField" onchange="currentPage=0;render()">
+          <option value="default">新增順序</option>
+          <option value="title">書名</option>
+          <option value="author">作者</option>
+          <option value="year">出版年</option>
+          <option value="rating">評分</option>
+          <option value="finishedDate">讀完日期</option>
+        </select>
+        <button class="dir-btn" id="dirBtn" onclick="toggleSortDir()" title="升冪／降冪">↑</button>
+      </div>
+      <div id="pagination"></div>
+    </div>
     <div class="booklist" id="booklist"><div class="loading">連線 Firebase 中…</div></div>
   </div>
 
@@ -495,6 +515,7 @@ let goals = {}; goals[THIS_YEAR] = 50;
 let nextId = 1;
 let activeFilter = 'all', activeRating = 0, activeTag = '', activeNoteFilter = '', activeLocFilter = '';
 let tagOrder = [], tagSorting = false, dragTag = null, tagExpanded = false;
+let sortDir = 'asc';   // 排序方向（不記憶，重新整理回預設）
 let editingId = null, currentTags = [], currentLocs = [];
 const PAGE_SIZE = 50;
 let currentPage = 0;
@@ -844,8 +865,28 @@ function tagDrop(e, target) {
 
 function goPage(p) { currentPage = p; renderList(); window.scrollTo({top:0,behavior:'smooth'}); }
 
+// 書架排序（不記憶，預設新增順序）
+function sortBooks(list) {
+  const f = document.getElementById('sortField') ? document.getElementById('sortField').value : 'default';
+  const arr = [...list];
+  if (f === 'default') {
+    arr.sort((a,b) => a.id - b.id);
+  } else if (f === 'year' || f === 'rating') {
+    arr.sort((a,b) => (Number(a[f])||0) - (Number(b[f])||0));
+  } else {
+    arr.sort((a,b) => String(a[f]||'').localeCompare(String(b[f]||''), 'zh-Hant'));
+  }
+  if (sortDir === 'desc') arr.reverse();
+  return arr;
+}
+function toggleSortDir() {
+  sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  document.getElementById('dirBtn').textContent = sortDir === 'asc' ? '↑' : '↓';
+  currentPage = 0; render();
+}
+
 function renderList() {
-  const list = filtered();
+  const list = sortBooks(filtered());
   const paginationEl = document.getElementById('pagination');
   if (!list.length) {
     document.getElementById('booklist').innerHTML = '<div class="empty">沒有找到符合的書</div>';
