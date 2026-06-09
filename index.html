@@ -768,7 +768,7 @@ function renderList() {
         </div>
       </div>` : ''}
     </div>`;
-  }).join('') + pagination;
+  }).join('');
 }
 
 function toggleBook(id) { books = books.map(b => b.id===id ? {...b, open:!b.open} : b); renderList(); }
