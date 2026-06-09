@@ -457,7 +457,7 @@ let goals = {}; goals[THIS_YEAR] = 50;
 let nextId = 1;
 let activeFilter = 'all', activeRating = 0, activeTag = '', activeNoteFilter = '', activeLocFilter = '';
 let editingId = null, currentTags = [], currentLocs = [];
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 let currentPage = 0;
 let activeGoalYear = THIS_YEAR, activePieStatus = 'all', activeBarYear = THIS_YEAR;
 let pieChartInst = null, barChartInst = null;
@@ -725,12 +725,12 @@ function renderList() {
   const pageItems = list.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const btnStyle = 'font-size:12px;padding:4px 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;color:#444';
   const btnDisabled = 'font-size:12px;padding:4px 14px;border:1px solid #eee;border-radius:8px;background:#f5f5f3;cursor:default;color:#bbb';
-  paginationEl.innerHTML = totalPages > 1 ? `
+  paginationEl.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 0 12px;font-size:13px;color:#888">
       <button onclick="goPage(${currentPage-1})" ${currentPage===0?'disabled':''} style="${currentPage===0?btnDisabled:btnStyle}">← 上一頁</button>
       <span>第 ${currentPage+1} 頁 / 共 ${totalPages} 頁（${list.length} 本）</span>
       <button onclick="goPage(${currentPage+1})" ${currentPage===totalPages-1?'disabled':''} style="${currentPage===totalPages-1?btnDisabled:btnStyle}">下一頁 →</button>
-    </div>` : '';
+    </div>`;
   document.getElementById('booklist').innerHTML = pageItems.map(b => {
     const stars = b.rating ? '★'.repeat(b.rating) + '☆'.repeat(5-b.rating) : '';
     const dateStr = b.status==='done' && b.finishedDate ? formatDate(b.finishedDate) : '';
